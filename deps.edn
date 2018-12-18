@@ -1,6 +1,7 @@
-{:deps {net.cgrand/xforms {:mvn/version "0.18.2"}
-        com.rpl/specter {:mvn/version "1.1.2"}
-        binaryage/oops {:mvn/version "0.6.4"}}
+{:deps {net.cgrand/xforms  {:mvn/version "0.18.2"}
+        com.rpl/specter    {:mvn/version "1.1.2"}
+        binaryage/oops     {:mvn/version "0.6.4"}
+        com.taoensso/tufte {:mvn/version "2.0.1"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {org.clojure/clojure {:mvn/version "1.10.0-RC5"}
@@ -10,10 +11,10 @@
                       org.clojure/test.check {:mvn/version "RELEASE"}
                       ;;org.clojure/spec.alpha {:local/root "/Users/Borkdude/git/spec.alpha"}
                       chivorcam {:mvn/version "1.0.0"}
-                      speculative {:mvn/version "0.0.3-SNAPSHOT"}
+                      speculative {:mvn/version "0.0.3-SNAPSHOT"}}}
                       ;; workarounds-1.10.439 {:git/url "https://github.com/mfikes/workarounds-1.10.439"
                       ;;                       :sha "a559201602fc6a21701479b83086d76bd5ed09eb"}
-                      }}
+
   :test-clj
   {:extra-paths ["test"]
    :extra-deps {com.cognitect/test-runner
