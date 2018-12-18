@@ -6,7 +6,7 @@
     [clojure.test :as t :refer [is testing]]
     [clojure.string :as str]))
 
-(def dungeon
+(def test-dungeon
   ;#######
   ;#.G...#   G(200)
   ;#...EG#   E(200), G(200)
@@ -16,8 +16,11 @@
   ;#######
   "#######\n#.G...#\n#...EG#\n#.#.#G#\n#..G#E#\n#.....#\n#######")
 
-(def static-unit-stats {:attack-power 3})
-(def starting-unit-stats {:hit-points 200})
+(def my-dungeon
+  "################################\n#########....G#######.##########\n##########.G########...#########\n###########.########.#.#########\n###########.#..G######..######.#\n##########..#...###......G..##.#\n##.#######......#..G....E#.....#\n##.##..######...........E..E####\n##.##...###................#####\n#.....G.G...........G.....######\n#...G....G...................###\n#G.G.............EG..........###\n#..G..........#####.........####\n##.G.......G.#######.........###\n#####....G..#########..G.E....##\n####....#...#########.........##\n#######.##..#########...#.....##\n#########...#########.....######\n##########..#########G....######\n##########...#######..E...######\n##########....#####...#EE.######\n#########.........G.......######\n#########............###########\n############..........##########\n############.......#.###########\n###########...........##########\n###########........#.###########\n##########E.#......#############\n#########...##....E.############\n#########.######....############\n################....############\n################################\n")
+
+(def starting-hp 200)
+(def attack-power 3)
 
 ; Round structure
 ; * Pick the first unit sorted by [x y]
@@ -39,37 +42,198 @@
         coll))
     colls))
 
-(map println (str/split-lines dungeon))
+(map println (str/split-lines test-dungeon))
 
 (def parse-cell {\# :wall
                  \. :space
                  \E :elf
-                 \G :goblin})
+                 \G :gob})
 
-(def new-goblin starting-unit-stats)
-(def new-elf starting-unit-stats)
+(defn a-star-comparator [a b]
+  (compare [(:distance a) (vec (reverse (:loc a)))]
+           [(:distance b) (vec (reverse (:loc b)))]))
 
-(defn parse-units [parsed-input type new-unit]
+(defn reading-order [a b]
+  (compare (vec (reverse a))
+           (vec (reverse b))))
+
+(defn parse-units [parsed-input]
   (->> parsed-input
-       (filter #(#{type} (second %)))
-       (map first)
-       (#(zipmap % (repeat new-unit)))
-       (into (sorted-map))))
+       (filter #(#{:elf :gob} (second %)))
+       (map (fn [[loc type]]
+              [loc {:type type :hp starting-hp}]))
+       (into (sorted-map-by reading-order))))
 
 (defn parse [input]
   (let [parsed-input (->> (str/split-lines input)
                           (map-indexed-2d (fn [x y c]
                                             [[x y] (parse-cell c)]))
                           (apply concat))
-        dungeon (->> parsed-input
-                     (filter #(#{:space :goblin :elf} (second %)))
-                     (map first)
-                     (into #{}))
-        goblins (parse-units parsed-input :goblin new-goblin)
-        elves (parse-units parsed-input :elf new-elf)]
-    {:dungeon dungeon
-     :goblins goblins
-     :elves elves}))
+        spaces (->> parsed-input
+                    (filter #(#{:space :gob :elf} (second %)))
+                    (map first)
+                    (into #{}))
+        units (parse-units parsed-input)]
+    {:spaces spaces
+     :units  units}))
+
+(defn neighbors [loc]
+  (doall (for [v [[1 0] [0 1] [-1 0] [0 -1]]]
+           (mapv + loc v))))
+
+(defn make-node [current-node loc]
+  {:distance (inc (:distance current-node))
+   :loc      loc
+   :parent   (:loc current-node)})
+
+(defn search-space [units spaces initial-loc]
+  (let [initial-node {:distance 0 :loc initial-loc}
+        open-spaces (apply disj spaces (keys units))]
+    (->> {:open-node-pq (sorted-set-by a-star-comparator initial-node)
+          :node-index {(:loc initial-node) initial-node}}
+         (iterate (fn [{:keys [open-node-pq node-index]}]
+                    (let [current-node (first open-node-pq)
+                          new-nodes (->> current-node
+                                         :loc
+                                         neighbors
+                                         (filter open-spaces)
+                                         (remove node-index)
+                                         (map (partial make-node current-node)))]
+                      {:open-node-pq (-> open-node-pq
+                                         (disj current-node)
+                                         (into new-nodes))
+                       :node-index (merge node-index
+                                          (zipmap (map :loc new-nodes)
+                                                  new-nodes))})))
+         (take-while #(seq (:open-node-pq %)))
+         (map :node-index))
+    #_(loop [open-node-pq (sorted-set-by a-star-comparator initial-node)
+             node-index {(:loc initial-node) initial-node}]
+        (if (empty? open-node-pq)
+          node-index
+          (let [current-node (first open-node-pq)
+                new-nodes (->> current-node
+                               :loc
+                               neighbors
+                               (filter open-spaces)
+                               (remove node-index)
+                               (map (partial make-node current-node)))]
+            (recur (-> open-node-pq
+                       (disj current-node)
+                       (into new-nodes))
+                   (merge node-index
+                          (zipmap (map :loc new-nodes)
+                                  new-nodes))))))))
+
+(def enemy {:elf :gob
+            :gob :elf})
+
+(defn enemy-of? [actor-type [_ other-stats]]
+  (let [other-type (:type other-stats)]
+    (= other-type
+       (enemy actor-type))))
+
+(defn next-location [current-loc initial-units spaces]
+  (let [attacking-locations (->> initial-units
+                                 (filter (partial enemy-of? (:type (initial-units current-loc))))
+                                 keys
+                                 (mapcat neighbors)
+                                 (into #{})
+                                 (filter spaces)
+                                 (remove (dissoc initial-units current-loc))
+                                 (into #{}))
+        searched-space (->> (search-space initial-units spaces current-loc)
+                            (filter #(some % attacking-locations))
+                            first)]
+    (if searched-space
+      (->> (some searched-space attacking-locations)
+           (iterate (comp searched-space :parent))
+           (filter #(or (= current-loc (:loc %))
+                        (= current-loc (:parent %))))
+           first
+           :loc)
+      current-loc)))
+
+(do
+  (let [initial-units {[2 1] {:type :gob, :hp 200}, [3 2] {:type :gob, :hp 200}, [3 4] {:type :gob, :hp 200}, [4 2] {:type :elf, :hp 200}, [5 2] {:type :gob, :hp 200}, [5 3] {:type :gob, :hp 200}, [5 4] {:type :elf, :hp 200}}
+        open-spaces #{[2 2] [2 5] [3 3] [5 4] [1 1] [3 4] [4 2] [5 3] [4 1] [5 2] [1 4] [1 3] [1 5] [5 1] [5 5] [2 4] [4 5] [3 1] [2 1] [1 2] [3 5] [3 2]}]
+    (is (= [3 1] (next-location [2 1] initial-units open-spaces)))
+    (is (= [3 2] (next-location [3 2] initial-units open-spaces)))
+    (is (= [3 5] (next-location [3 4] initial-units open-spaces)))
+    (is (= [4 2] (next-location [4 2] initial-units open-spaces)))))
+
+(do
+  (let [m (parse my-dungeon)
+        spaces (:spaces m)
+        initial-units (:units m)]
+    (is (= [13 1] (next-location [13 1] initial-units spaces)))))
+
+(defn remove-dead-body [units loc]
+  (if (pos? (get-in units [loc :hp]))
+    units
+    (dissoc units loc)))
+
+(def print-space {:elf   \E
+                  :gob   \G
+                  :space \.
+                  :wall  \#})
+
+(defn print-dungeon [spaces units]
+  (let [x-min (dec (apply min (map first spaces)))
+        x-max (inc (apply max (map first spaces)))
+        y-min (dec (apply min (map second spaces)))
+        y-max (inc (apply max (map second spaces)))]
+    (->> (for [y (range y-min (inc y-max))]
+           (for [x (range x-min (inc x-max))]
+              (print-space (or (:type (units [x y]))
+                               (when (spaces [x y]) :space)
+                               :wall))))
+         (map #(apply str %))
+         (str/join \newline))))
+
+(defn attack-enemy [units current-loc]
+  (let [actor-type (get-in units [current-loc :type])]
+    (if-let [[target-loc _] (->> (select-keys units (neighbors current-loc))
+                                 (filter (partial enemy-of? actor-type))
+                                 (sort-by first reading-order)
+                                 first)]
+      (-> units
+          (update-in [target-loc :hp] - attack-power)
+          (remove-dead-body target-loc))
+      units)))
+
+(defn println-identity [& args]
+  (apply println args)
+  (last args))
+
+(defn step [spaces units]
+  ;(println "Starting a round...")
+  (reduce (fn [current-units [current-loc]]
+            ;(println "Acting unit: " current-loc (current-units current-loc))
+            (let [unit-stats (current-units current-loc)
+                  next-loc (next-location current-loc current-units spaces)]
+              (-> current-units
+                  (dissoc current-loc)
+                  (assoc next-loc unit-stats)
+                  (attack-enemy next-loc))))
+          units
+          units))
+
+(let [m (parse my-dungeon)
+      spaces (:spaces m)
+      initial-units (:units m)
+      iterations (iterate (partial step spaces) initial-units)]
+  (doseq [units (take 5 (drop 200 iterations))]
+    (println (print-dungeon spaces units))))
+
+(let [m (parse test-dungeon)
+      spaces (:spaces m)
+      initial-units (:units m)
+      iterations (iterate (partial step spaces) initial-units)]
+  (doseq [[i units] (take 50 (map-indexed (fn [i units] [i units]) iterations))]
+    (println "Round " i)
+    (println (print-dungeon spaces units)))
+  (clojure.pprint/pprint (nth iterations 47)))
 
 (defn solve-1 [])
 ;; TODO
