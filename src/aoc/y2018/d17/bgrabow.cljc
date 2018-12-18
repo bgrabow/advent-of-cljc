@@ -64,28 +64,21 @@
         (recur cells (left outlet) (conj uncertain-water outlet))))
 
 (defn flow-sideways [{:keys [cells] :as m} outlet]
-  ;(println "flow-sideways")
   (let [right (flow-right cells (right outlet))
         left (flow-left cells (left outlet))
-        ;_ (println "got left & right" left right)
         uncertain-water (-> [outlet]
                             (into (:uncertain-water right))
                             (into (:uncertain-water left)))
         new-outlets (into (:new-outlets right) (:new-outlets left))]
-    ;(println "right" right)
-    ;(println "left" left)
-    ;(println "uncertain-water" uncertain-water)
-    ;(println "new-outlets" new-outlets)
-    (p ::flow-sideways-update-map
-       (if (seq new-outlets)
-         (-> m
-             (update :consumed-outlets conj outlet)
-             (update :new-outlets into new-outlets)
-             (update :cells merge (zipmap uncertain-water (repeat :flowing-water))))
-         (-> m
-             (update :consumed-outlets conj outlet)
-             (update :revisit-upwards conj outlet)
-             (update :cells merge (zipmap uncertain-water (repeat :still-water))))))))
+    (if (seq new-outlets)
+      (-> m
+          (update :consumed-outlets conj outlet)
+          (update :new-outlets into new-outlets)
+          (update :cells merge (zipmap uncertain-water (repeat :flowing-water))))
+      (-> m
+          (update :consumed-outlets conj outlet)
+          (update :revisit-upwards conj outlet)
+          (update :cells merge (zipmap uncertain-water (repeat :still-water)))))))
 
 (defn flow-downwards [m outlet]
   (-> m
