@@ -19,8 +19,10 @@
 (def my-dungeon
   "################################\n#########....G#######.##########\n##########.G########...#########\n###########.########.#.#########\n###########.#..G######..######.#\n##########..#...###......G..##.#\n##.#######......#..G....E#.....#\n##.##..######...........E..E####\n##.##...###................#####\n#.....G.G...........G.....######\n#...G....G...................###\n#G.G.............EG..........###\n#..G..........#####.........####\n##.G.......G.#######.........###\n#####....G..#########..G.E....##\n####....#...#########.........##\n#######.##..#########...#.....##\n#########...#########.....######\n##########..#########G....######\n##########...#######..E...######\n##########....#####...#EE.######\n#########.........G.......######\n#########............###########\n############..........##########\n############.......#.###########\n###########...........##########\n###########........#.###########\n##########E.#......#############\n#########...##....E.############\n#########.######....############\n################....############\n################################\n")
 
+(def test-dungeon2
+  "#########\n#G..G..G#\n#.......#\n#.......#\n#G..E..G#\n#.......#\n#.......#\n#G..G..G#\n#########")
+
 (def starting-hp 200)
-(def attack-power 3)
 
 ; Round structure
 ; * Pick the first unit sorted by [x y]
@@ -57,25 +59,29 @@
   (compare (vec (reverse a))
            (vec (reverse b))))
 
-(defn parse-units [parsed-input]
+(defn parse-units [parsed-input attack-powers]
   (->> parsed-input
        (filter #(#{:elf :gob} (second %)))
        (map (fn [[loc type]]
-              [loc {:type type :hp starting-hp}]))
+              [loc {:type type :hp starting-hp :attack-power (attack-powers type)}]))
        (into (sorted-map-by reading-order))))
 
-(defn parse [input]
-  (let [parsed-input (->> (str/split-lines input)
-                          (map-indexed-2d (fn [x y c]
-                                            [[x y] (parse-cell c)]))
-                          (apply concat))
-        spaces (->> parsed-input
-                    (filter #(#{:space :gob :elf} (second %)))
-                    (map first)
-                    (into #{}))
-        units (parse-units parsed-input)]
-    {:spaces spaces
-     :units  units}))
+(defn parse
+  ([input]
+   (parse input {:gob 3
+                 :elf 3}))
+  ([input attack-powers]
+   (let [parsed-input (->> (str/split-lines input)
+                           (map-indexed-2d (fn [x y c]
+                                             [[x y] (parse-cell c)]))
+                           (apply concat))
+         spaces (->> parsed-input
+                     (filter #(#{:space :gob :elf} (second %)))
+                     (map first)
+                     (into #{}))
+         units (parse-units parsed-input attack-powers)]
+     {:spaces spaces
+      :units  units})))
 
 (defn neighbors [loc]
   (doall (for [v [[1 0] [0 1] [-1 0] [0 -1]]]
@@ -90,7 +96,7 @@
   (let [initial-node {:distance 0 :loc initial-loc}
         open-spaces (apply disj spaces (keys units))]
     (->> {:open-node-pq (sorted-set-by a-star-comparator initial-node)
-          :node-index {(:loc initial-node) initial-node}}
+          :node-index   {(:loc initial-node) initial-node}}
          (iterate (fn [{:keys [open-node-pq node-index]}]
                     (let [current-node (first open-node-pq)
                           new-nodes (->> current-node
@@ -102,9 +108,9 @@
                       {:open-node-pq (-> open-node-pq
                                          (disj current-node)
                                          (into new-nodes))
-                       :node-index (merge node-index
-                                          (zipmap (map :loc new-nodes)
-                                                  new-nodes))})))
+                       :node-index   (merge node-index
+                                            (zipmap (map :loc new-nodes)
+                                                    new-nodes))})))
          (take-while #(seq (:open-node-pq %)))
          (map :node-index))
     #_(loop [open-node-pq (sorted-set-by a-star-comparator initial-node)
@@ -146,7 +152,9 @@
                             (filter #(some % attacking-locations))
                             first)]
     (if searched-space
-      (->> (some searched-space attacking-locations)
+      (->> (keep searched-space attacking-locations)
+           (sort-by identity a-star-comparator)
+           first
            (iterate (comp searched-space :parent))
            (filter #(or (= current-loc (:loc %))
                         (= current-loc (:parent %))))
@@ -184,21 +192,33 @@
         y-min (dec (apply min (map second spaces)))
         y-max (inc (apply max (map second spaces)))]
     (->> (for [y (range y-min (inc y-max))]
-           (for [x (range x-min (inc x-max))]
-              (print-space (or (:type (units [x y]))
-                               (when (spaces [x y]) :space)
-                               :wall))))
-         (map #(apply str %))
+           (str (->> (for [x (range x-min (inc x-max))]
+                       (print-space (or (:type (units [x y]))
+                                        (when (spaces [x y]) :space)
+                                        :wall)))
+                     (apply str))
+
+                "   "
+
+                (->> (for [x (range x-min (inc x-max))]
+                       (when-let [unit (units [x y])]
+                         (str (print-space (:type unit)) \( (:hp unit) \))))
+                     (remove nil?)
+                     (str/join " "))))
          (str/join \newline))))
+
+(defn attack-order [[loc-a a] [loc-b b]]
+  (compare [(:hp a) (vec (reverse loc-a))]
+           [(:hp b) (vec (reverse loc-b))]))
 
 (defn attack-enemy [units current-loc]
   (let [actor-type (get-in units [current-loc :type])]
     (if-let [[target-loc _] (->> (select-keys units (neighbors current-loc))
                                  (filter (partial enemy-of? actor-type))
-                                 (sort-by first reading-order)
+                                 (sort-by identity attack-order)
                                  first)]
       (-> units
-          (update-in [target-loc :hp] - attack-power)
+          (update-in [target-loc :hp] - (get-in units [current-loc :attack-power]))
           (remove-dead-body target-loc))
       units)))
 
@@ -210,14 +230,27 @@
   ;(println "Starting a round...")
   (reduce (fn [current-units [current-loc]]
             ;(println "Acting unit: " current-loc (current-units current-loc))
-            (let [unit-stats (current-units current-loc)
-                  next-loc (next-location current-loc current-units spaces)]
-              (-> current-units
-                  (dissoc current-loc)
-                  (assoc next-loc unit-stats)
-                  (attack-enemy next-loc))))
+            (if-let [unit-stats (current-units current-loc)]
+              (let [next-loc (next-location current-loc current-units spaces)]
+                (-> current-units
+                    (dissoc current-loc)
+                    (assoc next-loc unit-stats)
+                    (attack-enemy next-loc)))
+              current-units))
           units
           units))
+
+(defn has-elf? [units]
+  (not-empty (filter #(= :elf (:type %))
+                     (vals units))))
+
+(defn has-gob? [units]
+  (not-empty (filter #(= :gob (:type %))
+                     (vals units))))
+
+(defn has-elf-and-goblin? [units]
+  (and (has-elf? units)
+       (has-gob? units)))
 
 (let [m (parse my-dungeon)
       spaces (:spaces m)
@@ -226,16 +259,51 @@
   (doseq [units (take 5 (drop 200 iterations))]
     (println (print-dungeon spaces units))))
 
-(let [m (parse test-dungeon)
-      spaces (:spaces m)
-      initial-units (:units m)
-      iterations (iterate (partial step spaces) initial-units)]
-  (doseq [[i units] (take 50 (map-indexed (fn [i units] [i units]) iterations))]
-    (println "Round " i)
-    (println (print-dungeon spaces units)))
-  (clojure.pprint/pprint (nth iterations 47)))
+(defn solve-dungeon [dungeon]
+  (let [m (parse dungeon)
+        spaces (:spaces m)
+        initial-units (:units m)
+        iterations (iterate (partial step spaces) initial-units)
+        [last-round final-units] (first (drop-while (comp has-elf-and-goblin? second)
+                                                    (map-indexed #(vector %1 %2) iterations)))]
+    (println "Combat ends on" last-round)
+    (println (print-dungeon spaces final-units))
+    [last-round final-units]))
 
-(defn solve-1 [])
+(defn calculate-score [last-round final-units]
+  (* (dec last-round)
+     (->> final-units
+          vals
+          (map :hp)
+          (reduce +))))
+
+(def test-cases
+  [["#######\n#G..#E#\n#E#E.E#\n#G.##.#\n#...#E#\n#...E.#\n#######"
+    {:rounds 37
+     :value 36334
+     :visual "#######\n#...#E#   E(200)\n#E#...#   E(197)\n#.E##.#   E(185)\n#E..#E#   E(200), E(200)\n#.....#\n#######"}]
+   ["#######\n#E..EG#\n#.#G.E#\n#E.##E#\n#G..#.#\n#..E#.#\n#######"
+    {:rounds 46
+     :value 39514
+     :visual "#######\n#.E.E.#   E(164), E(197)\n#.#E..#   E(200)\n#E.##.#   E(98)\n#.E.#.#   E(200)\n#...#.#\n#######"}]
+   ["#######\n#E.G#.#\n#.#G..#\n#G.#.G#\n#G..#.#\n#...E.#\n#######"
+    {:rounds 35
+     :value 27755
+     :visual "#######\n#G.G#.#   G(200), G(98)\n#.#G..#   G(200)\n#..#..#\n#...#G#   G(95)\n#...G.#   G(200)\n#######"}]])
+
+(for [[initial {:keys [value visual rounds]}] test-cases]
+  (let [{:keys [units spaces]} (parse initial)]
+    (println "Initial layout----------------")
+    (println (print-dungeon spaces units))
+    (println "Combat expected end" rounds)
+    (let [[last-round final-units] (solve-dungeon initial)]
+      (println "Calculated score" (calculate-score last-round final-units)
+               "Expected" value)
+      (println "Expected layout")
+      (println visual))))
+
+(defn solve-1 []
+  (apply calculate-score (solve-dungeon my-dungeon)))
 ;; TODO
 
 
