@@ -260,9 +260,8 @@
     (println (print-dungeon spaces units))))
 
 (defn solve-dungeon [dungeon]
-  (let [m (parse dungeon)
-        spaces (:spaces m)
-        initial-units (:units m)
+  (let [spaces (:spaces dungeon)
+        initial-units (:units dungeon)
         iterations (iterate (partial step spaces) initial-units)
         [last-round final-units] (first (drop-while (comp has-elf-and-goblin? second)
                                                     (map-indexed #(vector %1 %2) iterations)))]
@@ -296,18 +295,53 @@
     (println "Initial layout----------------")
     (println (print-dungeon spaces units))
     (println "Combat expected end" rounds)
-    (let [[last-round final-units] (solve-dungeon initial)]
+    (let [[last-round final-units] (solve-dungeon (parse initial))]
       (println "Calculated score" (calculate-score last-round final-units)
                "Expected" value)
       (println "Expected layout")
       (println visual))))
 
 (defn solve-1 []
-  (apply calculate-score (solve-dungeon my-dungeon)))
-;; TODO
+  (apply calculate-score
+         (solve-dungeon (parse my-dungeon))))
 
+(defn n-elves [units]
+  (->> units
+       vals
+       (filter #(= :elf (:type %)))
+       count))
 
-(defn solve-2 [])
+(defn n-goblins [units]
+  (->> units
+       vals
+       (filter #(= :gob (:type %)))
+       count))
+
+(defn all-elves-survive? [dungeon elf-ap]
+  (println "Simulating elf ap" elf-ap)
+  (let [{:keys [units spaces]} (parse dungeon {:elf elf-ap :gob 3})
+        initial-elves (n-elves units)
+        final-state
+        (first
+          (drop-while (comp has-elf-and-goblin? second)
+                      (take-while #(= initial-elves (n-elves (second %)))
+                                  (map-indexed #(vector %1 %2)
+                                               (iterate (partial step spaces) units)))))]
+    final-state))
+
+(let [dungeon (parse my-dungeon {:elf 100 :gob 3})]
+  (let [spaces (:spaces dungeon)
+        initial-units (:units dungeon)
+        initial-elves (n-elves initial-units)
+        iterations (iterate (partial step spaces) initial-units)]
+    (->> (range)
+         (map (partial all-elves-survive? my-dungeon))
+         (some identity)
+         (apply calculate-score))))
+
+(defn solve-2 []
+  (apply calculate-score (solve-dungeon (parse my-dungeon {:elf 20
+                                                           :gob 3}))))
 ;; TODO
 
 
