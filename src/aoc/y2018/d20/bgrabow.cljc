@@ -6,63 +6,65 @@
     [clojure.test :as t :refer [is testing]]
     [clojure.string :as str]))
 
-"^WSSEESWWWNW(S|NENNEEEENN(ESSSSW(NWSW|SSEN)|WSWWN(E|WWS(E|SS))))$"
-"WSSEESWWWNW(S|NENNEEEENN(ESSSSW(NWSW|SSEN)|WSWWN(E|WWS(E|SS))))"
-"(S|NENNEEEENN(ESSSSW(NWSW|SSEN)|WSWWN(E|WWS(E|SS))))"
+(def step {\N [0 -1]
+           \S [0 1]
+           \E [1 0]
+           \W [-1 0]})
 
-(defn parse [input]
-  (-> input
-      (str/replace #"\^" "(")
-      (str/replace #"\$" ")")
-      (str/replace #"\|" " ")
-      (str/replace #"\b" "\"")
-      u/read-string))
+(defn letter [c acc]
+  (let [{:keys [loc factory]} acc]
+    (let [next-room (mapv + loc (step c))]
+      (if (factory next-room)  ; Assume no cycles.
+        (assoc acc :loc next-room)
+        (-> acc
+            (update-in [:factory loc] #(into #{next-room} %))
+            (assoc :loc next-room))))))
 
-(parse "^WSSEESWWWNW(S|NENNEEEENN(ESSSSW(NWSW|SSEN)|WSWWN(E|WWS(E|SS))))$")
+(defn open-paren [acc]
+  (update acc :intersections conj (:loc acc)))
 
-(->> (u/read-string "(WSSEESWWWNW(S|NENNEEEENN(ESSSSW(NWSW|SSEN)|WSWWN(E|WWS(E|SS)))))")
-     second)
+(defn close-paren [acc]
+  (-> acc
+      (assoc :loc (-> acc :intersections peek))
+      (update :intersections pop)))
 
-(->> (parse "^WSSEESWWWNW(S|NENNEEEENN(ESSSSW(NWSW|SSEN)|WSWWN(E|WWS(E|SS))))$")
-     second)
+(defn pipe [acc]
+  (assoc acc :loc (-> acc :intersections peek)))
 
-["WSSEESWWWNW" ["S"] ["NENNEEEENN" ["ESSSSW" ["NWSW" "SSEN"]]]]
+(defn parse-factory [input]
+  (reduce (fn [acc ^Character c]
+            (case c
+              (\^ \$) acc
+              (\N \S \E \W) (letter c acc)
+              (\() (open-paren acc)
+              (\)) (close-paren acc)
+              (\|) (pipe acc)))
+          {:factory {}
+           :intersections [[0 0]]
+           :loc [0 0]}
+          input))
 
-"^ENWWW(NEEE|SSE(EE|N))$"
+(defn build-stack [factory stack]
+  (let [nodes (peek stack)
+        children (mapcat factory nodes)]
+    (if (empty? children)
+      stack
+      (recur factory (conj stack children)))))
 
-"^ENNWSWW(NEWS|)SSSEEN(WNSE|)EE(SWEN|)NNN$"
+(defn solve-1 []
+  (-> (parse-factory input)
+      :factory
+      (build-stack ['([0 0])])
+      count
+      dec))
 
-(def backtrack {\N \S
-                \S \N
-                \E \W
-                \W \E})
-
-(defn not-backtracking [[x y]]
-  (not= (backtrack x) y))
-
-(defn path-length [s]
-  (if-let [s (->> (partition 2 1 s)
-                  (take-while not-backtracking))]
-    (inc (count s))
-    0))
-
-(deftest linear
-         (is (= (path-length "WSSEESWWWNW") 11)))
-(deftest backtrack
-         (is (= (path-length "NEWS") 2)))
-(deftest backtrack
-         (is (= (path-length "SSEN") 4)))
-
-
-
-
-(defn solve-1 [])
-;; TODO
-
-
-(defn solve-2 [])
-;; TODO
-
+(defn solve-2 []
+  (-> (parse-factory input)
+      :factory
+      (build-stack ['([0 0])])
+      (->> (drop 1000))
+      (->> (apply concat))
+      count))
 
 (deftest part-1
          (is (= (str answer-1)
@@ -76,4 +78,3 @@
 
 (comment
   (t/run-tests))
-
